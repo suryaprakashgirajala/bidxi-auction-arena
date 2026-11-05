@@ -6,3 +6,41 @@ build/
 npm-debug.log*
 backend/data/*.sqlite
 backend/data/*.sqlite-journal
+
+# Local backups - never upload
+.arena-v4-backup/
+.arena-v5-ai-backup/
+backups/
+
+# Local databases
+*.sqlite
+*.sqlite-journal
+*.db
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Dependencies and builds
+node_modules/
+build/
+
+# Local backups
+.arena-v4-backup/
+.arena-v5-ai-backup/
+backups/
+
+# Database files
+*.sqlite
+*.sqlite-journal
+*.db
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+build/
