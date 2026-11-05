@@ -1,0 +1,274 @@
+/* BIDXI UI refresh — loaded after App.css so these are intentional overrides. */
+
+/* Brand-led, uncluttered top navigation */
+.app-shell .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  min-height: 82px;
+  height: auto;
+  padding: 12px clamp(18px, 4.5vw, 76px);
+}
+
+.app-shell .topbar-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 11px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--arena-text);
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.app-shell .topbar-brand strong {
+  display: inline-block;
+  font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+  font-size: clamp(28px, 2.5vw, 36px);
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: 2.2px;
+  background: linear-gradient(105deg, #ffd16d 0%, #ffffff 47%, #54dce8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 3px 14px rgba(54, 188, 218, .16));
+}
+
+.app-shell .topbar-brand span {
+  color: var(--arena-text);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1.35px;
+  opacity: .92;
+}
+
+.app-shell .topbar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.app-shell .topbar-right .connection-pill {
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.app-shell .topbar-right .theme-toggle,
+.app-shell .topbar-right .account-nav,
+.app-shell .topbar-right .logout-button {
+  min-height: 39px;
+  white-space: nowrap;
+}
+
+.app-shell .topbar-right .account-name {
+  max-width: 150px;
+  overflow: hidden;
+  color: var(--arena-text);
+  font-size: 11px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell .topbar-right .theme-toggle {
+  padding: 10px 14px;
+  border: 1px solid var(--arena-border);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(58, 83, 125, .32), rgba(13, 24, 42, .46));
+  color: var(--arena-text);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .9px;
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+
+.app-shell .topbar-right .theme-toggle:hover,
+.app-shell .topbar-right .account-nav:hover,
+.app-shell .topbar-right .logout-button:hover {
+  transform: translateY(-2px);
+  border-color: var(--arena-accent);
+  box-shadow: 0 7px 20px rgba(242, 189, 85, .12);
+}
+
+/* Player Pool and Analytics remain accessible through the home-page cards. */
+.app-shell .management-launchers {
+  margin-top: 22px;
+  margin-bottom: 44px;
+}
+
+.app-shell .management-launch-card {
+  min-height: 86px;
+  border: 1px solid var(--arena-border);
+  background: linear-gradient(125deg, var(--arena-panel-2), var(--arena-panel));
+}
+
+/* Make the Create / Join target feel deliberate when users jump down to it. */
+html {
+  scroll-behavior: smooth;
+}
+
+.app-shell .entry-section,
+.app-shell .entry-grid {
+  scroll-margin-top: 106px;
+}
+
+.app-shell .entry-card.selected {
+  border-color: color-mix(in srgb, var(--arena-accent) 70%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--arena-accent) 20%, transparent), 0 18px 46px rgba(0, 0, 0, .13);
+}
+
+/* Aurora light theme: luminous blue, teal and violet instead of flat white. */
+.app-shell.theme-light {
+  color-scheme: light;
+  --arena-bg: #e8eef8;
+  --arena-panel: rgba(255, 255, 255, .88);
+  --arena-panel-2: rgba(247, 250, 255, .96);
+  --arena-border: rgba(50, 76, 122, .17);
+  --arena-text: #172743;
+  --arena-muted: #62738f;
+  --arena-input: #f5f8fe;
+  --arena-accent: #a96d16;
+  --arena-cyan: #087f91;
+  background:
+    radial-gradient(ellipse at 6% 6%, rgba(65, 190, 221, .25), transparent 31%),
+    radial-gradient(ellipse at 94% 9%, rgba(166, 112, 218, .22), transparent 32%),
+    radial-gradient(ellipse at 52% 88%, rgba(247, 185, 103, .17), transparent 34%),
+    linear-gradient(135deg, #e9f1fc 0%, #e6eafa 48%, #f7eee4 100%);
+}
+
+.app-shell.theme-light::before {
+  opacity: .28;
+  filter: blur(65px);
+}
+
+.app-shell.theme-light .topbar {
+  background: linear-gradient(100deg, rgba(248, 251, 255, .94), rgba(235, 243, 255, .92));
+  border-bottom: 1px solid rgba(60, 89, 137, .17);
+  box-shadow: 0 8px 28px rgba(45, 70, 112, .08);
+  backdrop-filter: blur(20px);
+}
+
+.app-shell.theme-light .topbar-brand strong {
+  background: linear-gradient(105deg, #a96a12 0%, #243957 47%, #078a9d 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.app-shell.theme-light .topbar-brand span,
+.app-shell.theme-light .topbar-right .account-name {
+  color: #263b5c;
+}
+
+.app-shell.theme-light .topbar-right .theme-toggle {
+  border-color: rgba(49, 83, 132, .2);
+  background: linear-gradient(120deg, rgba(255,255,255,.94), rgba(223,237,251,.94));
+  color: #243b5e;
+}
+
+.app-shell.theme-light .topbar-right .account-nav,
+.app-shell.theme-light .topbar-right .logout-button {
+  color: #314866;
+  border-color: rgba(49, 83, 132, .22);
+}
+
+.app-shell.theme-light .feature-strip {
+  background: linear-gradient(105deg, rgba(255,255,255,.9), rgba(227,239,252,.94), rgba(238,230,249,.92));
+  box-shadow: 0 15px 42px rgba(40, 70, 115, .09);
+}
+
+.app-shell.theme-light .feature-strip b,
+.app-shell.theme-light .management-launch-card b {
+  color: #1b304e;
+}
+
+.app-shell.theme-light .management-launch-card {
+  background: linear-gradient(125deg, rgba(255,255,255,.95), rgba(231,240,252,.94));
+  box-shadow: 0 14px 34px rgba(40, 70, 115, .08);
+}
+
+.app-shell.theme-light .entry-card,
+.app-shell.theme-light .setup-card,
+.app-shell.theme-light .panel-box,
+.app-shell.theme-light .auth-card {
+  box-shadow: 0 18px 48px rgba(48, 73, 115, .09), inset 0 1px 0 rgba(255,255,255,.76);
+}
+
+/* Responsive header: keep the brand and controls tidy on phones. */
+@media (max-width: 900px) {
+  .app-shell .topbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    padding: 13px 22px;
+  }
+
+  .app-shell .topbar-brand {
+    min-height: 35px;
+  }
+
+  .app-shell .topbar-right {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell .topbar {
+    justify-content: center;
+    padding: 12px 14px;
+  }
+
+  .app-shell .topbar-brand {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .app-shell .topbar-brand strong {
+    font-size: 29px;
+  }
+
+  .app-shell .topbar-brand span {
+    font-size: 8px;
+    letter-spacing: .9px;
+  }
+
+  .app-shell .topbar-right {
+    width: 100%;
+    justify-content: center;
+    gap: 7px;
+  }
+
+  .app-shell .topbar-right .connection-pill {
+    font-size: 8px;
+  }
+
+  .app-shell .topbar-right .theme-toggle,
+  .app-shell .topbar-right .account-nav,
+  .app-shell .topbar-right .logout-button {
+    min-height: 34px;
+    padding: 8px 10px;
+    font-size: 8px;
+  }
+
+  .app-shell .topbar-right .account-name {
+    max-width: 88px;
+    font-size: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

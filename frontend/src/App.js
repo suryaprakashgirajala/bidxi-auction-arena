@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import "./App.css";
+import "./BidxiUiRefresh.css";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:4000";
 const FRANCHISES = [
@@ -154,6 +155,7 @@ export default function App() {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState("");
   const chatEndRef = useRef(null);
+  const entrySectionRef = useRef(null);
 
   useEffect(() => {
     if (!authToken) {
@@ -675,15 +677,66 @@ export default function App() {
   const botCount = room ? room.teams.filter((team) => team.ownerType === "BOT").length : 0;
   const humanCount = room ? room.members.filter((member) => member.connected).length : 0;
 
+  const openEntryPanel = (mode, roomCode = "") => {
+    setPanel(mode);
+    setMessage("");
+    if (mode === "JOIN" && roomCode) {
+      setJoinForm((previous) => ({ ...previous, code: roomCode }));
+    }
+    window.requestAnimationFrame(() => {
+      entrySectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
   const renderHeader = () => (
     <header className="topbar">
-      {/* Header logo removed: the larger BIDXI logo remains in the homepage hero and auth screen. */}
+      <button
+        type="button"
+        className="topbar-brand"
+        onClick={() => { if (account && !room) setScreen("HOME"); }}
+        aria-label="BIDXI home"
+      >
+        <strong>BIDXI</strong>
+        <span>BUILD YOUR XI. OWN THE GAME.</span>
+      </button>
+
       <div className="topbar-right">
-        <span className={`connection-pill ${connection === "CONNECTED" ? "online" : "offline"}`}><i />{authLoading ? "RESTORING SESSION" : !account ? "LOGIN REQUIRED" : connection === "CONNECTED" ? "SERVER ONLINE" : connection === "CONNECTING" ? "CONNECTING" : "SERVER OFFLINE"}</span>
+        <span className={`connection-pill ${connection === "CONNECTED" ? "online" : "offline"}`}>
+          <i />
+          {authLoading
+            ? "RESTORING SESSION"
+            : !account
+              ? "LOGIN REQUIRED"
+              : connection === "CONNECTED"
+                ? "SERVER ONLINE"
+                : connection === "CONNECTING"
+                  ? "CONNECTING"
+                  : "SERVER OFFLINE"}
+        </span>
+
         {room && <span className="room-chip">ROOM <b>{room.code}</b></span>}
-        <button type="button" className="theme-toggle" onClick={() => setTheme((value) => value === "DARK" ? "LIGHT" : "DARK")} aria-label="Toggle background theme">{theme === "DARK" ? "☀ LIGHT MODE" : "☾ DARK MODE"}</button>
-        {account && !room && <><button className={`account-nav ${screen === "PLAYERS" ? "active" : ""}`} onClick={openPlayerManager}>PLAYER POOL</button><button className={`account-nav ${screen === "ANALYTICS" ? "active" : ""}`} onClick={openAnalytics}>ANALYTICS</button><button className={`account-nav ${screen === "PROFILE" ? "active" : ""}`} onClick={() => { setScreen("PROFILE"); loadProfile(); }}>MY ACCOUNT</button></>}
-        {account && <><span className="account-name">{account.displayName}</span><button className="logout-button" onClick={logout}>LOG OUT</button></>}
+
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={() => setTheme((value) => value === "DARK" ? "LIGHT" : "DARK")}
+          aria-label={theme === "DARK" ? "Switch to light background" : "Switch to dark background"}
+        >
+          {theme === "DARK" ? "☀ LIGHT THEME" : "☾ DARK THEME"}
+        </button>
+
+        {account && !room && (
+          <button
+            type="button"
+            className={`account-nav ${screen === "PROFILE" ? "active" : ""}`}
+            onClick={() => { setScreen("PROFILE"); loadProfile(); }}
+          >
+            MY ACCOUNT
+          </button>
+        )}
+
+        {account && <span className="account-name" title={account.displayName}>{account.displayName}</span>}
+        {account && <button type="button" className="logout-button" onClick={logout}>LOG OUT</button>}
       </div>
     </header>
   );
@@ -748,8 +801,8 @@ export default function App() {
           <h1>BUILD YOUR<br /><span>CHAMPION XI.</span></h1>
           <p className="hero-lede">Your friends. Your franchise. Your strategy. Enter a live cricket auction where every bid can change your season.</p>
           <div className="hero-actions">
-            <button className="btn btn-primary btn-large" onClick={() => { setPanel("CREATE"); setMessage(""); }}>CREATE AUCTION <span>↗</span></button>
-            <button className="btn btn-outline btn-large" onClick={() => { setPanel("JOIN"); setMessage(""); }}>JOIN WITH CODE</button>
+            <button className="btn btn-primary btn-large" onClick={() => openEntryPanel("CREATE")}>CREATE AUCTION <span>↗</span></button>
+            <button className="btn btn-outline btn-large" onClick={() => openEntryPanel("JOIN")}>JOIN WITH CODE</button>
           </div>
           <div className="hero-proof"><span>●</span> PLAY SOLO OR WITH FRIENDS <i /> AI FRANCHISES FILL THE REST</div>
         </div>
@@ -776,20 +829,20 @@ export default function App() {
         <button className="panel-box management-launch-card" onClick={openAnalytics}><span className="management-launch-icon">◫</span><span><b>AUCTION ANALYTICS</b><small>Explore spending, top purchases and auction trends</small></span><i>→</i></button>
       </section>
 
-      <section className="entry-section">
+      <section className="entry-section" id="auction-entry-section" ref={entrySectionRef}>
         <div className="section-heading"><div><span className="eyebrow">GET INTO THE ARENA</span><h2>How do you want to play?</h2></div><span className="muted-note">No fixed team count. You decide.</span></div>
         <div className="entry-grid">
           <div className={`entry-card ${panel === "CREATE" ? "selected" : ""}`}>
             <div className="entry-card-head"><span className="entry-number">01</span><span className="entry-icon">＋</span></div>
             <h3>Create an auction</h3>
             <p>Set the rules, choose how many franchises you want and invite your friends. AI takes every unclaimed team.</p>
-            <button className="text-action" onClick={() => { setPanel("CREATE"); setMessage(""); }}>SET UP A ROOM <span>→</span></button>
+            <button className="text-action" onClick={() => openEntryPanel("CREATE")}>SET UP A ROOM <span>→</span></button>
           </div>
           <div className={`entry-card ${panel === "JOIN" ? "selected" : ""}`}>
             <div className="entry-card-head"><span className="entry-number">02</span><span className="entry-icon">↗</span></div>
             <h3>Join a friend's room</h3>
             <p>Have a room code? Enter it, claim your franchise and get ready to outbid everyone.</p>
-            <button className="text-action" onClick={() => { setPanel("JOIN"); setMessage(""); }}>ENTER ROOM CODE <span>→</span></button>
+            <button className="text-action" onClick={() => openEntryPanel("JOIN")}>ENTER ROOM CODE <span>→</span></button>
           </div>
           <div className="setup-card">
             {panel === "CREATE" ? (
@@ -843,10 +896,10 @@ export default function App() {
         </div>
         <section className="public-rooms">
           <div className="public-rooms-heading"><div><span className="eyebrow">OPEN MATCHMAKING</span><h3>Public arenas</h3></div><span>{publicRooms.length} LOBBIES OPEN</span></div>
-          {publicRooms.length ? <div className="public-room-list">{publicRooms.map((openRoom) => <div className="public-room-row" key={openRoom.code}><div><b>{openRoom.code}</b><small>{openRoom.teamCount} franchises · {openRoom.humans} joined</small></div><button className="text-action" onClick={() => { setJoinForm({ ...joinForm, code: openRoom.code }); setPanel("JOIN"); window.scrollTo({ top: 0, behavior: "smooth" }); }}>JOIN ROOM →</button></div>)}</div> : <div className="no-public-rooms">No public lobbies are open right now. Create one and set visibility to Public to let other players discover it.</div>}
+          {publicRooms.length ? <div className="public-room-list">{publicRooms.map((openRoom) => <div className="public-room-row" key={openRoom.code}><div><b>{openRoom.code}</b><small>{openRoom.teamCount} franchises · {openRoom.humans} joined</small></div><button className="text-action" onClick={() => openEntryPanel("JOIN", openRoom.code)}>JOIN ROOM →</button></div>)}</div> : <div className="no-public-rooms">No public lobbies are open right now. Create one and set visibility to Public to let other players discover it.</div>}
         </section>
       </section>
-      <footer className="page-footer"><span>IPL AUCTION ARENA</span><span>BUILT FOR THE LOVE OF THE GAME.</span><span>263 PLAYER POOL · 10 FRANCHISE OPTIONS</span></footer>
+      <footer className="page-footer"><span>BIDXI</span><span>BUILD YOUR XI. OWN THE GAME.</span><span>263 PLAYER POOL · 10 FRANCHISE OPTIONS</span></footer>
     </main>
   );
 
