@@ -44,3 +44,22 @@ backups/
 # Dependencies
 node_modules/
 build/
+
+# BIDXI local backups
+.arena-v4-backup/
+.arena-v5-ai-backup/
+backups/
+
+# Database files
+*.sqlite
+*.sqlite-journal
+*.db
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+build/
