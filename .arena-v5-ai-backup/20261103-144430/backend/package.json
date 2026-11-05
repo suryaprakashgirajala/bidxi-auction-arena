@@ -1,0 +1,23 @@
+{
+  "name": "ipl-auction-arena-server",
+  "version": "1.2.0",
+  "private": true,
+  "description": "Realtime multiplayer IPL auction game server",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "check": "node --check src/server.js && node --check src/auth.js && node --check src/database.js && node --check src/aiEngine.js && node --check src/aiEngine.test.js",
+    "test": "node --test src/aiEngine.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "sql.js": "^1.15.2"
+  }
+}
