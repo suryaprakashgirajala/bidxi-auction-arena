@@ -1,11 +1,10 @@
 const crypto = require("crypto");
 const { promisify } = require("util");
-const { get, run } = require("./database");
+const { get, run, flushPersistentStore } = require("./database");
 
 const scrypt = promisify(crypto.scrypt);
 const JWT_SECRET = process.env.JWT_SECRET || "development-only-secret-change-this-before-deploying-ipl-arena";
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7;
-
 if (!process.env.JWT_SECRET) {
   if (process.env.NODE_ENV === "production") {
     throw new Error("JWT_SECRET must be configured before running in production.");
@@ -16,7 +15,6 @@ if (!process.env.JWT_SECRET) {
 function base64url(value) {
   return Buffer.from(value).toString("base64url");
 }
-
 function signToken(user) {
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
@@ -31,7 +29,6 @@ function signToken(user) {
   const signature = crypto.createHmac("sha256", JWT_SECRET).update(unsigned).digest("base64url");
   return `${unsigned}.${signature}`;
 }
-
 function verifyToken(token) {
   if (typeof token !== "string") throw new Error("Missing session token.");
   const parts = token.split(".");
@@ -49,13 +46,11 @@ function verifyToken(token) {
   }
   return payload;
 }
-
 async function hashPassword(password, saltHex) {
   const salt = saltHex ? Buffer.from(saltHex, "hex") : crypto.randomBytes(16);
   const derived = await scrypt(password, salt, 64);
   return { salt: salt.toString("hex"), hash: Buffer.from(derived).toString("hex") };
 }
-
 async function verifyPassword(password, saltHex, expectedHashHex) {
   const result = await hashPassword(password, saltHex);
   const expected = Buffer.from(expectedHashHex, "hex");
@@ -72,12 +67,10 @@ function publicUser(row) {
     createdAt: row.created_at
   };
 }
-
 function bearerToken(req) {
   const value = req.headers.authorization || "";
   return value.startsWith("Bearer ") ? value.slice(7).trim() : null;
 }
-
 function authenticateHttp(req, res, next) {
   try {
     const payload = verifyToken(bearerToken(req));
@@ -89,7 +82,6 @@ function authenticateHttp(req, res, next) {
     res.status(401).json({ error: error.message || "Authentication required." });
   }
 }
-
 function authenticateSocket(socket, next) {
   try {
     const payload = verifyToken(socket.handshake.auth?.token);
@@ -106,7 +98,6 @@ function authenticateSocket(socket, next) {
     next(new Error(error.message || "Authentication required."));
   }
 }
-
 async function registerAccount({ username, email, displayName, password }) {
   const safeUsername = String(username || "").trim();
   const safeEmail = String(email || "").trim().toLowerCase();
@@ -137,13 +128,14 @@ async function registerAccount({ username, email, displayName, password }) {
     password_salt: salt,
     created_at: new Date().toISOString()
   };
-  run(
+  // Await the Neon snapshot before reporting successful account creation.
+  await run(
     "INSERT INTO users (id, username, email, display_name, password_hash, password_salt, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     [user.id, user.username, user.email, user.display_name, user.password_hash, user.password_salt, user.created_at]
   );
+  await flushPersistentStore();
   return { user: publicUser(user), token: signToken(user) };
 }
-
 async function loginAccount({ identifier, password }) {
   const login = String(identifier || "").trim();
   if (!login || typeof password !== "string" || !password) throw new Error("Enter your email/username and password.");
@@ -156,15 +148,15 @@ async function loginAccount({ identifier, password }) {
   }
   return { user: publicUser(user), token: signToken(user) };
 }
-
 function updateDisplayName(userId, value) {
   const displayName = String(value || "").trim().replace(/\s+/g, " ").slice(0, 24);
   if (displayName.length < 2) throw new Error("Display name must contain at least 2 characters.");
+  // The update is applied immediately in the in-memory SQLite DB; its Neon
+  // snapshot is queued by run() and will be flushed after subsequent writes.
   run("UPDATE users SET display_name = ? WHERE id = ?", [displayName, userId]);
   const user = get("SELECT id, username, email, display_name, created_at FROM users WHERE id = ?", [userId]);
   return { user, token: signToken(user) };
 }
-
 module.exports = {
   signToken,
   verifyToken,
