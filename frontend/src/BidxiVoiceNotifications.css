@@ -1,0 +1,397 @@
+/* BIDXI voice chat + event notifications. Loaded after App.css and BidxiUiRefresh.css. */
+
+.chat-panel .panel-heading {
+  gap: 12px;
+}
+
+.chat-private-tag {
+  flex: 0 0 auto;
+  padding: 7px 9px;
+  border: 1px solid var(--arena-border);
+  border-radius: 999px;
+  color: var(--arena-muted);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.voice-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 13px 0 12px;
+  padding: 12px;
+  border: 1px solid var(--arena-border);
+  border-radius: 14px;
+  background: linear-gradient(120deg, rgba(42, 75, 104, .24), rgba(23, 35, 57, .18));
+}
+
+.voice-toolbar-copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.voice-toolbar-copy > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.voice-toolbar-copy b {
+  color: var(--arena-text);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 1px;
+}
+
+.voice-toolbar-copy small {
+  color: var(--arena-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.voice-status-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  background: #7d8998;
+  box-shadow: 0 0 0 4px rgba(125, 137, 152, .12);
+}
+
+.voice-status-dot.is-live {
+  background: #20d79b;
+  box-shadow: 0 0 0 4px rgba(32, 215, 155, .13), 0 0 16px rgba(32, 215, 155, .35);
+}
+
+.voice-toolbar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.voice-button {
+  min-height: 34px;
+  padding: 8px 11px;
+  border: 1px solid var(--arena-border);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .055);
+  color: var(--arena-text);
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: .75px;
+  transition: transform .18s ease, border-color .18s ease, background .18s ease;
+}
+
+.voice-button:hover {
+  transform: translateY(-1px);
+  border-color: var(--arena-cyan);
+}
+
+.voice-button.voice-join {
+  border-color: rgba(32, 215, 155, .45);
+  background: rgba(32, 215, 155, .12);
+  color: #50e5b2;
+}
+
+.voice-button.voice-leave {
+  border-color: rgba(239, 92, 104, .42);
+  color: #ff8992;
+}
+
+.voice-participant-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.voice-participant-row > span:first-child {
+  color: var(--arena-muted);
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: .9px;
+  margin-right: 3px;
+}
+
+.voice-person-chip {
+  padding: 5px 8px;
+  border: 1px solid rgba(32, 215, 155, .27);
+  border-radius: 999px;
+  background: rgba(32, 215, 155, .08);
+  color: var(--arena-text);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.voice-error {
+  margin: 0 0 10px;
+  padding: 9px 11px;
+  border: 1px solid rgba(239, 92, 104, .3);
+  border-radius: 9px;
+  background: rgba(239, 92, 104, .09);
+  color: #ff9ba2;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.voice-audio-elements {
+  display: none;
+}
+
+/* Consistent custom modal treatment for sale, unsold, pass and end-of-auction events. */
+.bidxi-event-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(3, 8, 16, .72);
+  backdrop-filter: blur(10px);
+  animation: bidxi-overlay-in .18s ease-out;
+}
+
+.bidxi-event-modal,
+.bidxi-confirm-modal {
+  position: relative;
+  width: min(100%, 470px);
+  padding: 30px 30px 25px;
+  overflow: hidden;
+  border: 1px solid rgba(139, 170, 203, .27);
+  border-radius: 23px;
+  background:
+    radial-gradient(circle at 50% -10%, rgba(70, 175, 208, .19), transparent 45%),
+    linear-gradient(150deg, #17253a, #0b1423 72%);
+  color: #f5f8fc;
+  text-align: center;
+  box-shadow: 0 28px 100px rgba(0, 0, 0, .48), 0 0 0 1px rgba(255, 255, 255, .035) inset;
+  animation: bidxi-modal-in .24s cubic-bezier(.2, .8, .2, 1);
+}
+
+.bidxi-event-modal::before,
+.bidxi-confirm-modal::before {
+  position: absolute;
+  top: 0;
+  left: 10%;
+  width: 80%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #52d6dc, #f1c16e, transparent);
+  content: "";
+}
+
+.bidxi-modal-close {
+  position: absolute;
+  top: 11px;
+  right: 13px;
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .13);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .055);
+  color: #d8e2ee;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.bidxi-event-icon {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  place-items: center;
+  margin: 0 auto 15px;
+  border: 1px solid rgba(255, 255, 255, .17);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, .07);
+  font-size: 30px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .2);
+}
+
+.bidxi-event-eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: #8fa9c1;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 2px;
+}
+
+.bidxi-event-modal h2,
+.bidxi-confirm-modal h2 {
+  margin: 0 0 11px;
+  color: #fff;
+  font-size: clamp(27px, 5vw, 38px);
+  font-weight: 950;
+  letter-spacing: .4px;
+}
+
+.bidxi-event-modal h3 {
+  margin: 0 auto 10px;
+  color: #f5cb78;
+  font-size: 17px;
+  font-weight: 850;
+  line-height: 1.3;
+}
+
+.bidxi-event-modal p,
+.bidxi-confirm-modal p {
+  margin: 0 auto 15px;
+  max-width: 360px;
+  color: #c0cddd;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.bidxi-event-detail {
+  display: inline-block;
+  margin: 0 auto 18px;
+  color: #7de1d2;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: .3px;
+}
+
+.bidxi-event-continue {
+  display: block;
+  width: 100%;
+  min-height: 43px;
+  border: 1px solid rgba(91, 207, 218, .42);
+  border-radius: 11px;
+  background: linear-gradient(105deg, rgba(20, 143, 164, .95), rgba(41, 177, 166, .95));
+  color: #fff;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 1.2px;
+}
+
+.bidxi-event-modal.event-sold .bidxi-event-icon { border-color: rgba(52, 214, 161, .36); background: rgba(52, 214, 161, .13); }
+.bidxi-event-modal.event-sold h2 { color: #65e4b8; }
+.bidxi-event-modal.event-unsold .bidxi-event-icon { border-color: rgba(239, 184, 92, .35); background: rgba(239, 184, 92, .12); }
+.bidxi-event-modal.event-unsold h2 { color: #ffd18a; }
+.bidxi-event-modal.event-pass .bidxi-event-icon { border-color: rgba(92, 173, 238, .35); background: rgba(92, 173, 238, .12); }
+.bidxi-event-modal.event-pass h2 { color: #8ecbff; }
+.bidxi-event-modal.event-ended .bidxi-event-icon,
+.bidxi-event-modal.event-complete .bidxi-event-icon { border-color: rgba(191, 155, 255, .35); background: rgba(160, 121, 245, .13); }
+.bidxi-event-modal.event-ended h2,
+.bidxi-event-modal.event-complete h2 { color: #c6a9ff; }
+
+.bidxi-confirm-modal {
+  width: min(100%, 440px);
+  padding: 31px 28px 25px;
+  text-align: left;
+}
+
+.bidxi-confirm-modal h2 {
+  padding-right: 20px;
+  font-size: 25px;
+}
+
+.bidxi-confirm-modal p {
+  margin: 0 0 22px;
+  max-width: none;
+}
+
+.bidxi-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.bidxi-confirm-actions button {
+  min-height: 40px;
+  padding: 10px 15px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .9px;
+}
+
+.bidxi-confirm-cancel {
+  border: 1px solid rgba(255, 255, 255, .16);
+  background: rgba(255, 255, 255, .06);
+  color: #d5dfeb;
+}
+
+.bidxi-confirm-yes {
+  border: 1px solid rgba(58, 195, 177, .45);
+  background: #168b8f;
+  color: #fff;
+}
+
+.confirm-danger .bidxi-confirm-yes {
+  border-color: rgba(245, 105, 112, .5);
+  background: #bd3f52;
+}
+
+.bidxi-confirm-yes:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+
+.app-shell.theme-light .voice-toolbar {
+  background: linear-gradient(120deg, rgba(255, 255, 255, .94), rgba(224, 239, 251, .9));
+}
+
+.app-shell.theme-light .voice-toolbar-copy b,
+.app-shell.theme-light .voice-person-chip {
+  color: #1d3554;
+}
+
+.app-shell.theme-light .voice-button {
+  background: rgba(255, 255, 255, .85);
+  color: #28415f;
+}
+
+.app-shell.theme-light .bidxi-event-modal,
+.app-shell.theme-light .bidxi-confirm-modal {
+  border-color: rgba(55, 89, 133, .2);
+  background:
+    radial-gradient(circle at 50% -10%, rgba(61, 173, 204, .14), transparent 45%),
+    linear-gradient(150deg, #f9fcff, #e8eff8 72%);
+  color: #172743;
+  box-shadow: 0 28px 100px rgba(28, 49, 82, .24), 0 0 0 1px rgba(255, 255, 255, .75) inset;
+}
+
+.app-shell.theme-light .bidxi-event-modal h2,
+.app-shell.theme-light .bidxi-confirm-modal h2 { color: #172743; }
+.app-shell.theme-light .bidxi-event-modal h3 { color: #986312; }
+.app-shell.theme-light .bidxi-event-modal p,
+.app-shell.theme-light .bidxi-confirm-modal p { color: #586d89; }
+.app-shell.theme-light .bidxi-event-eyebrow { color: #607897; }
+.app-shell.theme-light .bidxi-modal-close { border-color: rgba(47, 78, 121, .17); color: #35506f; }
+.app-shell.theme-light .bidxi-confirm-cancel { border-color: rgba(47, 78, 121, .2); color: #35506f; }
+
+@keyframes bidxi-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes bidxi-modal-in {
+  from { opacity: 0; transform: translateY(12px) scale(.975); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 520px) {
+  .voice-toolbar { align-items: flex-start; flex-direction: column; }
+  .voice-toolbar-actions { width: 100%; }
+  .voice-toolbar-actions button { flex: 1; }
+  .bidxi-event-modal, .bidxi-confirm-modal { padding: 27px 20px 21px; }
+  .bidxi-confirm-actions { justify-content: stretch; }
+  .bidxi-confirm-actions button { flex: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bidxi-event-overlay, .bidxi-event-modal, .bidxi-confirm-modal { animation: none; }
+}
