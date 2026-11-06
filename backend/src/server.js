@@ -7,7 +7,7 @@ const { Server } = require("socket.io");
 const playersPool = require("./players.json");
 const database = require("./database");
 const { chooseBotBid, getPersonalityLabel } = require("./aiEngine");
-const { buildPoolPreview, summarizeRemainingPlayers } = require("./playerPool");
+const { buildPoolPreview, summarizeRemainingPlayers, selectAuctionPlayerPool, normalizePlayerPoolSize, STAR_PLAYER_RATING } = require("./playerPool");
 const {
   authenticateHttp,
   authenticateSocket,
@@ -73,7 +73,8 @@ function normalizeSettings(input = {}) {
   const restrictionMode = ["IPL", "NONE", "CUSTOM"].includes(String(input.restrictionMode || "IPL").toUpperCase())
     ? String(input.restrictionMode || "IPL").toUpperCase()
     : "IPL";
-  const poolSize = playersPool.length;
+  const playerPoolSize = normalizePlayerPoolSize(input.playerPoolSize);
+  const poolSize = playerPoolSize === "FULL" ? playersPool.length : Number(playerPoolSize);
   let minSquadSize;
   let maxSquadSize;
   let maxOverseasPlayers;
@@ -96,6 +97,7 @@ function normalizeSettings(input = {}) {
   return {
     teamCount,
     humanLimit: clamp(input.humanLimit, 1, teamCount),
+    playerPoolSize,
     initialPurse: clamp(input.initialPurse, 20, 500),
     restrictionMode,
     minSquadSize,
@@ -150,7 +152,9 @@ function roomSnapshot(room) {
     status: room.status,
     hostMemberId: room.hostMemberId,
     creatorMemberId: room.creatorMemberId || room.hostMemberId,
-    members: room.members.map(({ id, name, teamId, connected, isHost, teamChoiceType }) => ({ id, name, teamId, connected, isHost, teamChoiceType })),
+    members: room.members.map(({ id, name, teamId, connected, isHost, teamChoiceType, voiceConnected }) => ({
+      id, name, teamId, connected, isHost, teamChoiceType, voiceConnected: Boolean(voiceConnected)
+    })),
     teams: room.teams,
     auction: auction ? {
       currentPlayer: auction.currentPlayer,
@@ -841,8 +845,20 @@ io.on("connection", (socket) => {
     if (humanTeams.length !== connectedMembers.length) return ackError(ack, "Every connected participant must select one franchise before the pool review.");
 
     const creator = room.members.find((member) => member.id === room.creatorMemberId);
-    const playerPool = getPlayerPoolForUser(creator?.userId);
-    if (playerPool.length < 10) return ackError(ack, "The player pool needs at least 10 active players.");
+    const availablePlayerPool = getPlayerPoolForUser(creator?.userId);
+    if (availablePlayerPool.length < 10) return ackError(ack, "The player pool needs at least 10 active players.");
+    const playerPool = selectAuctionPlayerPool(availablePlayerPool, room.settings.playerPoolSize);
+    if (playerPool.length < 10) return ackError(ack, "The selected player pool needs at least 10 active players.");
+
+    // Keep unrestricted/custom squad ceilings aligned with the pool actually selected.
+    if (room.settings.restrictionMode === "NONE") {
+      room.settings.maxSquadSize = playerPool.length;
+      room.settings.maxOverseasPlayers = playerPool.length;
+    } else if (room.settings.restrictionMode === "CUSTOM") {
+      room.settings.maxSquadSize = Math.min(room.settings.maxSquadSize, playerPool.length);
+      room.settings.minSquadSize = Math.min(room.settings.minSquadSize, room.settings.maxSquadSize);
+      room.settings.maxOverseasPlayers = Math.min(room.settings.maxOverseasPlayers, room.settings.maxSquadSize);
+    }
 
     const personalities = shuffle(["AGGRESSIVE", "DEFENSIVE", "BALANCED", "VALUE_HUNTER", "STAR_HUNTER"]);
     const usedCatalogIds = new Set(humanTeams.map((team) => team.catalogId).filter(Boolean));
@@ -871,8 +887,10 @@ io.on("connection", (socket) => {
       completedCount: 0, totalPlayers: playerPool.length, playerNumber: 0,
       lastResult: null, history: []
     };
-    addRoomMessage(room, "ARENA BOT", `The player pool is ready: ${playerPool.length} players. Every connected participant must review the role-wise list and confirm before bidding begins.`, true);
-    addHistory(room, "POOL_REVIEW", `Player pool review opened with ${playerPool.length} players.`);
+    const poolPresetLabel = room.settings.playerPoolSize === "FULL" ? "FULL POOL" : `${room.settings.playerPoolSize}+ PLAYER POOL`;
+    const starPlayerCount = playerPool.filter((player) => Number(player.arenaRating || 0) >= STAR_PLAYER_RATING).length;
+    addRoomMessage(room, "ARENA BOT", `${poolPresetLabel} is ready: ${playerPool.length} players, including all ${starPlayerCount} star players rated ${STAR_PLAYER_RATING}+. Every connected participant must review the role-wise list and confirm before bidding begins.`, true);
+    addHistory(room, "POOL_REVIEW", `${poolPresetLabel} review opened with ${playerPool.length} players and ${starPlayerCount} star players.`);
     publish(room);
     ackSuccess(ack, { room: roomSnapshot(room) });
   });
@@ -1023,6 +1041,47 @@ io.on("connection", (socket) => {
     publish(room);
   });
 
+  // WebRTC signaling only: microphone audio stays peer-to-peer and is never sent through this server.
+  socket.on("voice:join", (_payload, ack) => {
+    const room = getRoomForSocket(socket);
+    const member = room && getMember(socket, room);
+    if (!room || !member || !member.connected) return ackError(ack, "Join an auction room before joining voice chat.");
+    if (member.voiceConnected) return ackSuccess(ack);
+    member.voiceConnected = true;
+    const participants = room.members
+      .filter((item) => item.connected && item.voiceConnected && item.id !== member.id)
+      .map((item) => ({ memberId: item.id, name: item.name }));
+    socket.to(room.code).emit("voice:peer-joined", { memberId: member.id, name: member.name });
+    publish(room);
+    ackSuccess(ack, { participants });
+  });
+  socket.on("voice:signal", (payload = {}, ack) => {
+    const room = getRoomForSocket(socket);
+    const member = room && getMember(socket, room);
+    const toMemberId = String(payload.toMemberId || "");
+    const recipient = room && room.members.find((item) => item.id === toMemberId && item.connected && item.voiceConnected);
+    if (!room || !member || !member.voiceConnected || !recipient) return ackError(ack, "The other participant is not connected to voice.");
+    if (!payload.signal || typeof payload.signal !== "object" || JSON.stringify(payload.signal).length > 25000) {
+      return ackError(ack, "Invalid voice connection signal.");
+    }
+    socket.to(room.code).emit("voice:signal", {
+      fromMemberId: member.id,
+      toMemberId,
+      signal: payload.signal
+    });
+    ackSuccess(ack);
+  });
+  socket.on("voice:leave", (_payload, ack) => {
+    const room = getRoomForSocket(socket);
+    const member = room && getMember(socket, room);
+    if (!room || !member) return ackSuccess(ack);
+    if (member.voiceConnected) {
+      member.voiceConnected = false;
+      socket.to(room.code).emit("voice:peer-left", { memberId: member.id });
+      publish(room);
+    }
+    ackSuccess(ack);
+  });
   socket.on("chat:send", (payload = {}, ack) => {
     const room = getRoomForSocket(socket);
     const member = room && getMember(socket, room);
@@ -1037,6 +1096,10 @@ io.on("connection", (socket) => {
     const room = getRoomForSocket(socket);
     if (!room) return ackSuccess(ack);
     const member = getMember(socket, room);
+    if (member?.voiceConnected) {
+      member.voiceConnected = false;
+      socket.to(room.code).emit("voice:peer-left", { memberId: member.id });
+    }
     if (room.status === "LOBBY" && member && member.teamId) {
       const seatIndex = room.teams.findIndex((item) => item.id === member.teamId);
       if (seatIndex >= 0) resetTeamSlot(room.teams[seatIndex], seatIndex);
@@ -1064,6 +1127,10 @@ io.on("connection", (socket) => {
     const member = getMember(socket, room);
     if (member) {
       member.connected = false;
+      if (member.voiceConnected) {
+        member.voiceConnected = false;
+        socket.to(room.code).emit("voice:peer-left", { memberId: member.id });
+      }
       if (room.hostMemberId === member.id) {
         const nextHost = room.members.find((item) => item.connected);
         if (nextHost) {

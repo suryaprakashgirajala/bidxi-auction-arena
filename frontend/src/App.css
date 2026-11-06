@@ -570,3 +570,132 @@
 .app-shell.theme-light .bidxi-home-logo{box-shadow:0 12px 32px rgba(30,59,100,.16),0 0 24px rgba(21,166,225,.14)}
 @media(max-width:760px){.brand-logo{width:118px;height:52px}.bidxi-brand{min-width:124px;min-height:56px}.bidxi-home-logo{width:min(230px,82%)}.bidxi-auth-logo{width:min(270px,94%);margin-bottom:14px}}
 @media(prefers-reduced-motion:reduce){.bidxi-home-logo{animation:none!important}}
+/* BIDXI Player Pool Selection */
+
+.player-pool-selector {
+  margin: 20px 0 24px;
+  padding: 20px;
+  border: 1px solid rgba(232, 174, 58, 0.24);
+  border-radius: 18px;
+  background: linear-gradient(
+    145deg,
+    rgba(232, 174, 58, 0.075),
+    rgba(15, 23, 42, 0.42)
+  );
+}
+
+.player-pool-selector-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.player-pool-option-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.player-pool-option {
+  display: flex;
+  position: relative;
+  min-height: 142px;
+  flex-direction: column;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.19);
+  border-radius: 14px;
+  background: rgba(7, 13, 27, 0.66);
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.player-pool-option:hover {
+  transform: translateY(-3px);
+  border-color: #e8ae3a;
+}
+
+.player-pool-option.selected {
+  border-color: #e8ae3a;
+  background: rgba(232, 174, 58, 0.14);
+  box-shadow: 0 0 18px rgba(232, 174, 58, 0.12);
+}
+
+.player-pool-option input {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  accent-color: #e8ae3a;
+}
+
+.player-pool-option-count {
+  color: #f3c65f;
+  font-size: 1.65rem;
+  font-weight: 850;
+}
+
+.player-pool-option strong {
+  margin-top: 8px;
+  color: #f2f5fb;
+  font-size: 0.75rem;
+}
+
+.player-pool-option small {
+  margin-top: 5px;
+  color: #a9b4c7;
+}
+
+.player-pool-option em {
+  margin-top: auto;
+  padding-top: 12px;
+  color: #f3c65f;
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.player-pool-guarantee {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(232, 174, 58, 0.08);
+  color: #c3ccdb;
+  font-size: 0.8rem;
+}
+
+.player-pool-guarantee b {
+  color: #f3c65f;
+}
+
+@media (max-width: 720px) {
+  .player-pool-option-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Fix player pool radio button alignment */
+
+.player-pool-option {
+  position: relative;
+}
+
+.player-pool-option input[type="radio"] {
+  position: absolute !important;
+  top: 14px !important;
+  right: 14px !important;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  cursor: pointer;
+  accent-color: #e8ae3a;
+  z-index: 2;
+}
+
+.player-pool-option-count {
+  display: block;
+  padding-right: 25px;
+}

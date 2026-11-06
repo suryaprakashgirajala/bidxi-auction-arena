@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { io } from "socket.io-client";
 import "./App.css";
 import "./BidxiUiRefresh.css";
+import "./BidxiVoiceNotifications.css";
+
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:4000";
 const FRANCHISES = [
@@ -22,6 +24,7 @@ const DEFAULT_FORM = {
   teamCount: 5,
   humanLimit: 3,
   initialPurse: 120,
+  playerPoolSize: "FULL",
   restrictionMode: "IPL",
   minSquadSize: 18,
   maxSquadSize: 25,
@@ -53,6 +56,12 @@ function formatCr(value) {
 }
 function formatTime(timestamp) {
   return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+function playerPoolSelectionLabel(value) {
+  return String(value || "FULL").toUpperCase() === "FULL" ? "FULL POOL · 263+" : `${Number(value) || 263}+ PLAYERS`;
+}
+function playerPoolSelectionCeiling(value) {
+  return String(value || "FULL").toUpperCase() === "FULL" ? 263 : Number(value) || 263;
 }
 function initials(value) {
   return String(value || "? ").split(" ").slice(0, 2).map((part) => part[0]).join("").toUpperCase();
@@ -156,6 +165,16 @@ export default function App() {
   const [analyticsError, setAnalyticsError] = useState("");
   const chatEndRef = useRef(null);
   const entrySectionRef = useRef(null);
+  const lastAuctionEventIdRef = useRef(null);
+  const peerConnectionsRef = useRef(new Map());
+  const localVoiceStreamRef = useRef(null);
+  const voiceJoinedRef = useRef(false);
+  const [auctionPopup, setAuctionPopup] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [voiceJoined, setVoiceJoined] = useState(false);
+  const [voiceMuted, setVoiceMuted] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
+  const [remoteVoicePeers, setRemoteVoicePeers] = useState([]);
 
   useEffect(() => {
     if (!authToken) {
@@ -184,10 +203,75 @@ export default function App() {
     socket.on("room:joined", ({ room: nextRoom, memberId: nextMemberId }) => {
       setMemberId(nextMemberId);
       setRoom(nextRoom);
+      // Do not replay an old sale/pass/end notification when someone enters or reconnects.
+      lastAuctionEventIdRef.current = nextRoom.auction?.history?.slice(-1)[0]?.id || null;
       setScreen(nextRoom.status === "LIVE" ? "GAME" : nextRoom.status === "REVIEW" ? "REVIEW" : nextRoom.status === "COMPLETED" ? "RESULTS" : "LOBBY");
       setMessage("");
     });
     socket.on("room:state", (nextRoom) => {
+      const latestEvent = nextRoom.auction?.history?.slice(-1)[0];
+      if (latestEvent?.id && latestEvent.id !== lastAuctionEventIdRef.current) {
+        lastAuctionEventIdRef.current = latestEvent.id;
+        const winningTeam = latestEvent.teamId
+          ? nextRoom.teams?.find((team) => team.id === latestEvent.teamId)
+          : null;
+        if (latestEvent.type === "SOLD") {
+          setAuctionPopup({
+            id: latestEvent.id,
+            type: "sold",
+            icon: "🔨",
+            eyebrow: "THE HAMMER HAS FALLEN",
+            title: "SOLD!",
+            player: latestEvent.playerName || "Player",
+            message: `${winningTeam?.shortName || winningTeam?.name || "A franchise"} secured the player.`,
+            detail: formatCr(latestEvent.amount)
+          });
+        } else if (latestEvent.type === "UNSOLD") {
+          setAuctionPopup({
+            id: latestEvent.id,
+            type: "unsold",
+            icon: "◌",
+            eyebrow: "NO WINNING BID",
+            title: "UNSOLD",
+            player: latestEvent.playerName || "Player",
+            message: latestEvent.reason || "No franchise completed a winning bid.",
+            detail: "The auction moves to the next player."
+          });
+        } else if (latestEvent.type === "PASS") {
+          setAuctionPopup({
+            id: latestEvent.id,
+            type: "pass",
+            icon: "↷",
+            eyebrow: "FRANCHISE UPDATE",
+            title: "PLAYER PASSED",
+            player: latestEvent.playerName || "Current player",
+            message: `${winningTeam?.shortName || winningTeam?.name || latestEvent.memberName || "A franchise"} passed on this player.`,
+            detail: "Other franchises can continue bidding."
+          });
+        } else if (latestEvent.type === "END") {
+          setAuctionPopup({
+            id: latestEvent.id,
+            type: "ended",
+            icon: "🏁",
+            eyebrow: "ROOM CREATOR DECISION",
+            title: "AUCTION ENDED",
+            player: "The auction has been closed early.",
+            message: latestEvent.message || "Final franchise squads are ready.",
+            detail: "View the final squads to see every team's purchases."
+          });
+        } else if (latestEvent.type === "SYSTEM" && nextRoom.status === "COMPLETED") {
+          setAuctionPopup({
+            id: latestEvent.id,
+            type: "complete",
+            icon: "🏆",
+            eyebrow: "ALL LOTS PROCESSED",
+            title: "AUCTION COMPLETE",
+            player: "Every player has been processed.",
+            message: "The final franchise squads are ready.",
+            detail: "Open the results to review the teams."
+          });
+        }
+      }
       setRoom(nextRoom);
       if (nextRoom.status === "LIVE") setScreen("GAME");
       else if (nextRoom.status === "REVIEW") setScreen("REVIEW");
@@ -259,7 +343,7 @@ export default function App() {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [room?.chat?.length]);
+  }, [room?.chat?.filter((item) => !item.system).length]);
 
   const submitAuth = async (event) => {
     event.preventDefault();
@@ -294,6 +378,7 @@ export default function App() {
   };
 
   const logout = async () => {
+    await leaveVoice();
     if (room) await emit("room:leave");
     localStorage.removeItem("arena_token");
     setAuthToken("");
@@ -350,9 +435,186 @@ export default function App() {
     socket.emit(event, payload, (response) => resolve(response || { ok: false, error: "No response from server." }));
   }), []);
 
+  const removeVoicePeer = useCallback((peerId) => {
+    const peer = peerConnectionsRef.current.get(peerId);
+    if (peer) {
+      peer.ontrack = null;
+      peer.onicecandidate = null;
+      peer.onconnectionstatechange = null;
+      peer.close();
+      peerConnectionsRef.current.delete(peerId);
+    }
+    setRemoteVoicePeers((current) => current.filter((item) => item.memberId !== peerId));
+  }, []);
+
+  const createVoicePeerConnection = useCallback((peerId) => {
+    if (!peerId || !localVoiceStreamRef.current) return null;
+    const existing = peerConnectionsRef.current.get(peerId);
+    if (existing) return existing;
+    const peer = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+    localVoiceStreamRef.current.getTracks().forEach((track) => peer.addTrack(track, localVoiceStreamRef.current));
+    peer.ontrack = (event) => {
+      const stream = event.streams?.[0];
+      if (!stream) return;
+      setRemoteVoicePeers((current) => {
+        const found = current.some((item) => item.memberId === peerId);
+        return found
+          ? current.map((item) => item.memberId === peerId ? { ...item, stream } : item)
+          : [...current, { memberId: peerId, stream }];
+      });
+    };
+    peer.onicecandidate = (event) => {
+      if (!event.candidate) return;
+      socketRef.current?.emit("voice:signal", {
+        toMemberId: peerId,
+        signal: { candidate: event.candidate }
+      });
+    };
+    peer.onconnectionstatechange = () => {
+      if (["failed", "closed"].includes(peer.connectionState)) removeVoicePeer(peerId);
+    };
+    peerConnectionsRef.current.set(peerId, peer);
+    return peer;
+  }, [removeVoicePeer]);
+
+  const createVoiceOffer = useCallback(async (peerId) => {
+    try {
+      const peer = createVoicePeerConnection(peerId);
+      if (!peer || peer.signalingState !== "stable") return;
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      socketRef.current?.emit("voice:signal", {
+        toMemberId: peerId,
+        signal: { description: peer.localDescription }
+      });
+    } catch (error) {
+      setVoiceError(`Could not start voice with a participant: ${error.message || "connection error"}`);
+    }
+  }, [createVoicePeerConnection]);
+
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return undefined;
+    const handlePeerJoined = ({ memberId: peerId }) => {
+      if (peerId && peerId !== memberId && localVoiceStreamRef.current) createVoiceOffer(peerId);
+    };
+    const handlePeerLeft = ({ memberId: peerId }) => {
+      if (peerId) removeVoicePeer(peerId);
+    };
+    const handleVoiceSignal = async ({ fromMemberId, toMemberId, signal }) => {
+      if (!localVoiceStreamRef.current || toMemberId !== memberId || !fromMemberId || !signal) return;
+      try {
+        const peer = createVoicePeerConnection(fromMemberId);
+        if (!peer) return;
+        if (signal.description) {
+          const description = new RTCSessionDescription(signal.description);
+          await peer.setRemoteDescription(description);
+          if (description.type === "offer") {
+            const answer = await peer.createAnswer();
+            await peer.setLocalDescription(answer);
+            socket.emit("voice:signal", {
+              toMemberId: fromMemberId,
+              signal: { description: peer.localDescription }
+            });
+          }
+          if (peer.pendingVoiceCandidates?.length) {
+            for (const candidate of peer.pendingVoiceCandidates) await peer.addIceCandidate(new RTCIceCandidate(candidate));
+            peer.pendingVoiceCandidates = [];
+          }
+        } else if (signal.candidate) {
+          if (peer.remoteDescription) await peer.addIceCandidate(new RTCIceCandidate(signal.candidate));
+          else peer.pendingVoiceCandidates = [...(peer.pendingVoiceCandidates || []), signal.candidate];
+        }
+      } catch (error) {
+        setVoiceError(`Voice connection could not be established: ${error.message || "connection error"}`);
+      }
+    };
+    socket.on("voice:peer-joined", handlePeerJoined);
+    socket.on("voice:peer-left", handlePeerLeft);
+    socket.on("voice:signal", handleVoiceSignal);
+    return () => {
+      socket.off("voice:peer-joined", handlePeerJoined);
+      socket.off("voice:peer-left", handlePeerLeft);
+      socket.off("voice:signal", handleVoiceSignal);
+    };
+  }, [connection, memberId, createVoiceOffer, createVoicePeerConnection, removeVoicePeer]);
+
+  const joinVoice = async () => {
+    setVoiceError("");
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setVoiceError("Microphone access needs a secure HTTPS page and a supported browser.");
+      return;
+    }
+    if (!room || !memberId) {
+      setVoiceError("Join an auction room before joining voice chat.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: false
+      });
+      localVoiceStreamRef.current = stream;
+      voiceJoinedRef.current = true;
+      setVoiceJoined(true);
+      setVoiceMuted(false);
+      const result = await emit("voice:join");
+      if (!result.ok) throw new Error(result.error || "The voice room could not be joined.");
+    } catch (error) {
+      localVoiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+      localVoiceStreamRef.current = null;
+      voiceJoinedRef.current = false;
+      setVoiceJoined(false);
+      setVoiceError(error.message || "Unable to access your microphone.");
+    }
+  };
+
+  const toggleVoiceMute = () => {
+    const nextMuted = !voiceMuted;
+    localVoiceStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = !nextMuted; });
+    setVoiceMuted(nextMuted);
+  };
+
+  const leaveVoice = useCallback(async () => {
+    const wasJoined = voiceJoinedRef.current;
+    voiceJoinedRef.current = false;
+    if (wasJoined) await emit("voice:leave");
+    localVoiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+    localVoiceStreamRef.current = null;
+    [...peerConnectionsRef.current.keys()].forEach(removeVoicePeer);
+    peerConnectionsRef.current.clear();
+    setRemoteVoicePeers([]);
+    setVoiceJoined(false);
+    setVoiceMuted(false);
+    setVoiceError("");
+  }, [emit, removeVoicePeer]);
+
+  useEffect(() => {
+    if (!auctionPopup) return undefined;
+    const timeout = window.setTimeout(() => setAuctionPopup(null), auctionPopup.type === "ended" ? 7000 : 5200);
+    return () => window.clearTimeout(timeout);
+  }, [auctionPopup]);
+
+  useEffect(() => {
+    if (connection === "DISCONNECTED" && voiceJoinedRef.current) void leaveVoice();
+  }, [connection, leaveVoice]);
+
+  useEffect(() => {
+    if (room?.status === "COMPLETED" && voiceJoinedRef.current) void leaveVoice();
+  }, [room?.status, leaveVoice]);
+
+  useEffect(() => () => {
+    localVoiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+    peerConnectionsRef.current.forEach((peer) => peer.close());
+    peerConnectionsRef.current.clear();
+  }, []);
+
   const updateForm = (key, value) => {
     setForm((previous) => {
       const next = { ...previous, [key]: value };
+      const poolCeiling = playerPoolSelectionCeiling(next.playerPoolSize);
       if (key === "teamCount") next.humanLimit = Math.min(Number(next.humanLimit), Number(value));
       if (key === "humanLimit") next.humanLimit = Math.min(Number(value), Number(previous.teamCount));
       if (key === "restrictionMode" && value === "IPL") {
@@ -362,8 +624,19 @@ export default function App() {
       }
       if (key === "restrictionMode" && value === "NONE") {
         next.minSquadSize = 0;
-        next.maxSquadSize = 263;
-        next.maxOverseasPlayers = 263;
+        next.maxSquadSize = poolCeiling;
+        next.maxOverseasPlayers = poolCeiling;
+      }
+      if (key === "playerPoolSize") {
+        if (next.restrictionMode === "NONE") {
+          next.minSquadSize = 0;
+          next.maxSquadSize = poolCeiling;
+          next.maxOverseasPlayers = poolCeiling;
+        } else if (next.restrictionMode === "CUSTOM") {
+          next.maxSquadSize = Math.min(Number(next.maxSquadSize), poolCeiling);
+          next.minSquadSize = Math.min(Number(next.minSquadSize), next.maxSquadSize);
+          next.maxOverseasPlayers = Math.min(Number(next.maxOverseasPlayers), next.maxSquadSize);
+        }
       }
       if (key === "maxSquadSize") {
         next.minSquadSize = Math.min(Number(next.minSquadSize), Number(value));
@@ -384,7 +657,7 @@ export default function App() {
       playerName: form.playerName,
       settings: {
         teamCount: Number(form.teamCount), humanLimit: Number(form.humanLimit),
-        initialPurse: Number(form.initialPurse), restrictionMode: form.restrictionMode,
+        initialPurse: Number(form.initialPurse), playerPoolSize: form.playerPoolSize, restrictionMode: form.restrictionMode,
         minSquadSize: Number(form.minSquadSize), maxSquadSize: Number(form.maxSquadSize),
         maxOverseasPlayers: Number(form.maxOverseasPlayers),
         bidIncrement: Number(form.bidIncrement), timerSeconds: Number(form.timerSeconds),
@@ -475,19 +748,40 @@ export default function App() {
 
   const passOnPlayer = async () => {
     if (!currentPlayer || !myTeam) return;
-    if (!window.confirm(`Pass on ${currentPlayer.name}? Your franchise will not be able to bid on this player, but the auction will continue for everyone else.`)) return;
-    setBusy(true);
-    setMessage("");
-    const response = await emit("auction:pass");
-    setBusy(false);
-    if (!response.ok) setMessage(response.error);
+    setConfirmAction({
+      type: "PASS",
+      playerId: currentPlayer.id,
+      eyebrow: "FRANCHISE DECISION",
+      title: "Pass on this player?",
+      message: `${myTeam.shortName} will not be able to bid on ${currentPlayer.name} again in this lot. Other franchises can continue bidding.`,
+      confirmLabel: "YES, PASS PLAYER",
+      tone: "pass"
+    });
   };
 
   const endAuction = async () => {
-    if (!window.confirm("End this auction now? All current franchise squads will be shown to every participant.")) return;
+    setConfirmAction({
+      type: "END",
+      eyebrow: "CREATOR CONTROL",
+      title: "End this auction now?",
+      message: "Bidding will stop for everyone, and the current franchise squads will be shown. This action cannot be undone.",
+      confirmLabel: "END AUCTION",
+      tone: "danger"
+    });
+  };
+
+  const confirmRoomAction = async () => {
+    if (!confirmAction) return;
+    const action = confirmAction.type;
+    if (action === "PASS" && confirmAction.playerId !== currentPlayer?.id) {
+      setConfirmAction(null);
+      setMessage("The auction moved to another player while the confirmation was open. Please review the new player.");
+      return;
+    }
+    setConfirmAction(null);
     setBusy(true);
     setMessage("");
-    const response = await emit("room:end");
+    const response = await emit(action === "PASS" ? "auction:pass" : "room:end");
     setBusy(false);
     if (!response.ok) setMessage(response.error);
   };
@@ -502,6 +796,7 @@ export default function App() {
   };
 
   const leaveRoom = async () => {
+    await leaveVoice();
     await emit("room:leave");
     setRoom(null);
     setMemberId(null);
@@ -856,18 +1151,35 @@ export default function App() {
                 <div className="bot-preview"><span>AI FRANCHISES</span><b>{Math.max(0, Number(form.teamCount) - Number(form.humanLimit))}</b><small>minimum bots; every unclaimed seat becomes an AI rival</small></div>
                 <div className="creator-note"><span>✦</span><div><b>EVERY PARTICIPANT PICKS THEIR OWN FRANCHISE</b><small>After entering the lobby, each person can choose an official IPL team or build a custom franchise. Your room settings only control the number of team seats.</small></div></div>
                 <label>Team purse<select value={form.initialPurse} onChange={(e) => updateForm("initialPurse", Number(e.target.value))}><option value="80">₹80 Cr</option><option value="100">₹100 Cr</option><option value="120">₹120 Cr</option><option value="150">₹150 Cr</option><option value="200">₹200 Cr</option></select></label>
+                <section className="player-pool-selector" aria-label="Choose player pool size">
+                  <div className="player-pool-selector-heading"><div><span className="eyebrow">PLAYER POOL</span><h3>Choose your auction size</h3><p>Pick the number of players your group wants to auction.</p></div><span className="pool-selector-icon">🏏</span></div>
+                  <div className="player-pool-option-grid">
+                    {[
+                      { value: "FULL", count: "263+", title: "FULL POOL", detail: "Every available player" },
+                      { value: "175", count: "175+", title: "175+ PLAYER POOL", detail: "A shorter auction with every star player" },
+                      { value: "200", count: "200+", title: "200+ PLAYER POOL", detail: "More choices with every star player" }
+                    ].map((option) => <label key={option.value} className={`player-pool-option ${String(form.playerPoolSize) === option.value ? "selected" : ""}`}>
+                      <input type="radio" name="playerPoolSize" value={option.value} checked={String(form.playerPoolSize) === option.value} onChange={() => updateForm("playerPoolSize", option.value)} />
+                      <span className="player-pool-option-count">{option.count}</span>
+                      <strong>{option.title}</strong>
+                      <small>{option.detail}</small>
+                      {option.value !== "FULL" && <em>★ ALL 85+ RATED STAR PLAYERS INCLUDED</em>}
+                    </label>)}
+                  </div>
+                  <div className="player-pool-guarantee"><span>★</span><p><b>Star-player guarantee</b> — Every player with an Arena Rating of 85 or higher is included in both the 175+ and 200+ pools. Remaining spots are selected across all four roles to keep the pool balanced.</p></div>
+                </section>
                 <section className="restriction-setup" aria-label="Auction squad restrictions">
                   <div className="restriction-setup-heading"><div><span className="eyebrow">SQUAD RULES</span><h3>How strict should this auction be?</h3></div><span className="rules-shield">⚖</span></div>
                   <label>Restriction profile<select value={form.restrictionMode} onChange={(e) => updateForm("restrictionMode", e.target.value)}><option value="IPL">IPL standard restrictions</option><option value="NONE">No squad restrictions</option><option value="CUSTOM">Customize restrictions</option></select></label>
                   {form.restrictionMode === "IPL" && <div className="restriction-preview"><div><b>18</b><span>MINIMUM TARGET</span></div><div><b>25</b><span>MAX SQUAD</span></div><div><b>8</b><span>OVERSEAS MAX</span></div><small>IPL-style squad limits will apply to every human and AI franchise.</small></div>}
-                  {form.restrictionMode === "NONE" && <div className="restriction-preview unrestricted"><div><b>—</b><span>MINIMUM</span></div><div><b>263</b><span>PLAYER POOL CEILING</span></div><div><b>—</b><span>OVERSEAS CAP</span></div><small>Squads can buy any number of players up to the available player pool. Budget rules still apply.</small></div>}
+                  {form.restrictionMode === "NONE" && <div className="restriction-preview unrestricted"><div><b>—</b><span>MINIMUM</span></div><div><b>{playerPoolSelectionCeiling(form.playerPoolSize)}+</b><span>PLAYER POOL CEILING</span></div><div><b>—</b><span>OVERSEAS CAP</span></div><small>Squads can buy any number of players up to the available player pool. Budget rules still apply.</small></div>}
                   {form.restrictionMode === "CUSTOM" && <div className="custom-rule-fields">
                     <label>Minimum squad target<input type="number" min="0" max={form.maxSquadSize} value={form.minSquadSize} onChange={(e) => updateForm("minSquadSize", Number(e.target.value))} /></label>
-                    <label>Maximum squad size<input type="number" min="1" max="263" value={form.maxSquadSize} onChange={(e) => updateForm("maxSquadSize", Number(e.target.value))} /></label>
+                    <label>Maximum squad size<input type="number" min="1" max={playerPoolSelectionCeiling(form.playerPoolSize)} value={form.maxSquadSize} onChange={(e) => updateForm("maxSquadSize", Number(e.target.value))} /></label>
                     <label>Maximum overseas players<input type="number" min="0" max={form.maxSquadSize} value={form.maxOverseasPlayers} onChange={(e) => updateForm("maxOverseasPlayers", Number(e.target.value))} /></label>
                     <small>Maximum squad and overseas limits are enforced during bidding. Minimum squad is a target shown in team compliance.</small>
                   </div>}
-                  {form.restrictionMode !== "NONE" && Number(form.teamCount) * Number(form.minSquadSize) > 263 && <div className="rule-capacity-warning">⚠ The current player pool has 263 players, but {form.teamCount} teams × {form.minSquadSize} minimum players requires {Number(form.teamCount) * Number(form.minSquadSize)} players. The auction can still run; any minimum-squad shortfall will be shown in the final results.</div>}
+                  {form.restrictionMode !== "NONE" && Number(form.teamCount) * Number(form.minSquadSize) > playerPoolSelectionCeiling(form.playerPoolSize) && <div className="rule-capacity-warning">⚠ The selected player pool has {playerPoolSelectionCeiling(form.playerPoolSize)} players, but {form.teamCount} teams × {form.minSquadSize} minimum players requires {Number(form.teamCount) * Number(form.minSquadSize)} players. The auction can still run; any minimum-squad shortfall will be shown in the final results.</div>}
                   {form.restrictionMode !== "NONE" && form.restrictionMode !== "IPL" && <small className="rule-note">Minimum squad size is a completion target. The auction can finish below that target if too few players remain or teams choose not to buy more.</small>}
                 </section>
                 <div className="form-row">
@@ -899,7 +1211,7 @@ export default function App() {
           {publicRooms.length ? <div className="public-room-list">{publicRooms.map((openRoom) => <div className="public-room-row" key={openRoom.code}><div><b>{openRoom.code}</b><small>{openRoom.teamCount} franchises · {openRoom.humans} joined</small></div><button className="text-action" onClick={() => openEntryPanel("JOIN", openRoom.code)}>JOIN ROOM →</button></div>)}</div> : <div className="no-public-rooms">No public lobbies are open right now. Create one and set visibility to Public to let other players discover it.</div>}
         </section>
       </section>
-      <footer className="page-footer"><span>BIDXI</span><span>BUILD YOUR XI. OWN THE GAME.</span><span>263 PLAYER POOL · 10 FRANCHISE OPTIONS</span></footer>
+      <footer className="page-footer"><span>BIDXI</span><span>BUILD YOUR XI. OWN THE GAME.</span><span>175+ · 200+ · FULL PLAYER POOLS</span></footer>
     </main>
   );
 
@@ -999,6 +1311,7 @@ export default function App() {
               <div className="setting-line"><span>Human participants</span><b>{connectedMembers.length} / {room.settings.humanLimit}</b></div>
               <div className="setting-line"><span>Total franchises</span><b>{room.settings.teamCount}</b></div>
               <div className="setting-line"><span>Starting purse</span><b>{formatCr(room.settings.initialPurse)}</b></div>
+              <div className="setting-line"><span>Player pool</span><b>{playerPoolSelectionLabel(room.settings.playerPoolSize)}</b></div>
               <div className="setting-line"><span>Rule profile</span><b>{room.settings.restrictionMode === "IPL" ? "IPL standard" : room.settings.restrictionMode === "CUSTOM" ? "Custom" : "No restrictions"}</b></div>
               <div className="setting-line"><span>Squad size</span><b>{room.settings.minSquadSize || "No min"} – {room.settings.maxSquadSize}</b></div>
               <div className="setting-line"><span>Overseas maximum</span><b>{room.settings.maxOverseasPlayers >= 263 ? "Unlimited" : room.settings.maxOverseasPlayers}</b></div>
@@ -1046,12 +1359,44 @@ export default function App() {
           </div>
           <small className="rules-strip-note">Maximum squad size and overseas-player limit are enforced during bidding. Minimum squad size is a target and any shortfall is shown in squad status.</small>
         </section>
-        {room.auction.lastResult && <div key={`${room.auction.lastResult.playerName}-${room.auction.lastResult.status}-${room.auction.lastResult.amount || "skip"}`} className={`sale-banner ${room.auction.lastResult.status === "SOLD" ? "sold" : "unsold"}`}><b>{room.auction.lastResult.status}</b><span>{room.auction.lastResult.status === "SOLD" ? `${room.auction.lastResult.playerName} → ${room.auction.lastResult.teamName} for ${formatCr(room.auction.lastResult.amount)}` : room.auction.lastResult.skippedBy ? `${room.auction.lastResult.playerName} skipped by ${room.auction.lastResult.skippedBy}` : `${room.auction.lastResult.playerName} did not receive a bid`}</span></div>}
         <div className="game-grid game-grid-v6">
           <aside className="game-left-stack">
             <section className="panel-box activity-panel"><div className="panel-heading"><div><span className="eyebrow">LIVE FEED</span><h2>Auction activity</h2></div><span className="activity-live-tag">● LIVE</span></div><div className="activity-list">{[...(room.auction.history || [])].slice(-10).reverse().map((item) => <div className={`activity-item ${item.type.toLowerCase()}`} key={item.id}><i /> <div><p>{item.message}</p><small>{formatTime(item.at)}</small></div></div>)}</div></section>
             <section className="panel-box remaining-players-panel"><div className="panel-heading"><div><span className="eyebrow">PLAYER QUEUE</span><h2>Players remaining</h2></div><span className="count-badge">{Math.max(0, room.auction.totalPlayers - room.auction.completedCount)}</span></div><p className="remaining-panel-note">The counts below include the current lot and every unsold player still to come.</p>{(room.auction.remainingByCategory || []).map((category) => <details className="remaining-category" key={category.key}><summary><span>{category.label}</span><b>{category.total}</b><small>{category.domesticCount} domestic · {category.overseasCount} overseas</small></summary><div className="remaining-name-columns"><div><strong>DOMESTIC · {category.domesticCount}</strong>{category.domesticNames.map((name) => <span key={name}>{name}</span>)}</div><div><strong>OVERSEAS · {category.overseasCount}</strong>{category.overseasNames.map((name) => <span key={name}>{name}</span>)}</div></div></details>)}</section>
-            <section className="panel-box chat-panel"><div className="panel-heading"><div><span className="eyebrow">ROOM SOCIAL</span><h2>Live chat</h2></div></div><div className="chat-messages">{(room.chat || []).slice(-24).map((item) => <div className={`chat-message ${item.system ? "system" : ""}`} key={item.id}><div><b>{item.name}</b><small>{formatTime(item.at)}</small></div><p>{item.text}</p></div>)}<div ref={chatEndRef} /></div><form className="chat-compose" onSubmit={sendChat}><input maxLength="240" value={chatText} onChange={(e) => setChatText(e.target.value)} placeholder="Message your room..." /><button type="submit" disabled={!chatText.trim()}>SEND</button></form></section>
+            <section className="panel-box chat-panel">
+              <div className="panel-heading">
+                <div><span className="eyebrow">ROOM SOCIAL</span><h2>Team chat</h2></div>
+                <span className="chat-private-tag">MESSAGES ONLY</span>
+              </div>
+              <div className="voice-toolbar">
+                <div className="voice-toolbar-copy">
+                  <span className={`voice-status-dot ${voiceJoined ? "is-live" : ""}`} />
+                  <div><b>VOICE ROOM</b><small>{voiceJoined ? (voiceMuted ? "Your microphone is muted" : "You are connected to voice") : "Talk with the other participants"}</small></div>
+                </div>
+                <div className="voice-toolbar-actions">
+                  {!voiceJoined ? (
+                    <button type="button" className="voice-button voice-join" onClick={joinVoice}>🎙 JOIN VOICE</button>
+                  ) : <>
+                    <button type="button" className="voice-button" onClick={toggleVoiceMute}>{voiceMuted ? "UNMUTE" : "MUTE"}</button>
+                    <button type="button" className="voice-button voice-leave" onClick={leaveVoice}>LEAVE</button>
+                  </>}
+                </div>
+              </div>
+              {voiceError && <div className="voice-error" role="alert">{voiceError}</div>}
+              {voiceJoined && <div className="voice-participant-row">
+                <span>IN VOICE</span>
+                {(room.members || []).filter((member) => member.voiceConnected).map((member) => <span className="voice-person-chip" key={member.id}>{member.id === memberId ? "YOU" : member.name}</span>)}
+              </div>}
+              <div className="chat-messages">
+                {(room.chat || []).filter((item) => !item.system).slice(-24).map((item) => <div className="chat-message" key={item.id}><div><b>{item.name}</b><small>{formatTime(item.at)}</small></div><p>{item.text}</p></div>)}
+                <div ref={chatEndRef} />
+              </div>
+              <form className="chat-compose" onSubmit={sendChat}>
+                <input maxLength="240" value={chatText} onChange={(e) => setChatText(e.target.value)} placeholder="Message your teammates..." />
+                <button type="submit" disabled={!chatText.trim()}>SEND</button>
+              </form>
+              <div className="voice-audio-elements">{remoteVoicePeers.map((peer) => <audio key={peer.memberId} autoPlay playsInline ref={(element) => { if (element && element.srcObject !== peer.stream) element.srcObject = peer.stream; }} />)}</div>
+            </section>
           </aside>
           <section className="auction-stage panel-box">
             <div className="stage-top"><span className="eyebrow">NOW ON THE AUCTION BLOCK</span><span className="player-index">LOT #{String(room.auction.playerNumber).padStart(3, "0")}</span></div>
@@ -1094,7 +1439,7 @@ export default function App() {
     return <main className="workspace pool-review-workspace">
       <div className="pool-review-hero panel-box">
         <div><span className="eyebrow">PRE-AUCTION PLAYER BRIEFING</span><h1>REVIEW THE <span>PLAYER POOL.</span></h1><p>Every participant sees the same player list. Check the categories and overseas split before the auction begins.</p></div>
-        <div className="pool-review-total"><b>{pool?.totalPlayers || 0}</b><span>PLAYERS IN THIS AUCTION</span><small>{pool?.categories?.reduce((sum, category) => sum + category.overseasCount, 0) || 0} overseas · {room?.settings?.teamCount || 0} franchises</small></div>
+        <div className="pool-review-total"><b>{pool?.totalPlayers || 0}</b><span>PLAYERS IN THIS AUCTION</span><small>{pool?.categories?.reduce((sum, category) => sum + category.overseasCount, 0) || 0} overseas · {pool?.starPlayers || 0} star players rated {pool?.starRatingThreshold || 85}+ · {room?.settings?.teamCount || 0} franchises</small><em className="pool-review-preset">{playerPoolSelectionLabel(room?.settings?.playerPoolSize)} SELECTED</em></div>
       </div>
       <section className="pool-review-progress panel-box">
         <div className="panel-heading"><div><span className="eyebrow">PARTICIPANT CONFIRMATION</span><h2>Everyone must be ready</h2></div><span className="count-badge">{confirmed.length}/{connected.length}</span></div>
@@ -1106,8 +1451,8 @@ export default function App() {
         {(pool?.categories || []).map((category) => <article className="panel-box pool-category-card" key={category.key}>
           <div className="pool-category-heading"><div><span className="eyebrow">PLAYER CATEGORY</span><h2>{category.label}</h2></div><b>{category.total}</b></div>
           <div className="pool-category-stats"><span>🇮🇳 DOMESTIC <b>{category.domesticCount}</b></span><span>✈ OVERSEAS <b>{category.overseasCount}</b></span></div>
-          <details className="pool-name-group" open><summary>Domestic players <b>{category.domesticCount}</b></summary><div className="pool-name-list">{category.domesticPlayers.map((player) => <div key={player.id}><PlayerPortrait player={player} className="pool-player-thumb"/><span>{player.name}<small>{player.nationality}</small></span><b>{formatCr(player.basePrice)}</b></div>)}</div></details>
-          <details className="pool-name-group"><summary>Overseas players <b>{category.overseasCount}</b></summary><div className="pool-name-list">{category.overseasPlayers.map((player) => <div key={player.id}><PlayerPortrait player={player} className="pool-player-thumb"/><span>{player.name}<small>{player.nationality}</small></span><b>{formatCr(player.basePrice)}</b></div>)}</div></details>
+          <details className="pool-name-group" open><summary>Domestic players <b>{category.domesticCount}</b></summary><div className="pool-name-list">{category.domesticPlayers.map((player) => <div key={player.id}><PlayerPortrait player={player} className="pool-player-thumb"/><span>{player.name}<small>{player.nationality}{player.isStarPlayer ? ` · ★ STAR PLAYER · RATING ${player.arenaRating}` : ""}</small></span><b>{formatCr(player.basePrice)}</b></div>)}</div></details>
+          <details className="pool-name-group"><summary>Overseas players <b>{category.overseasCount}</b></summary><div className="pool-name-list">{category.overseasPlayers.map((player) => <div key={player.id}><PlayerPortrait player={player} className="pool-player-thumb"/><span>{player.name}<small>{player.nationality}{player.isStarPlayer ? ` · ★ STAR PLAYER · RATING ${player.arenaRating}` : ""}</small></span><b>{formatCr(player.basePrice)}</b></div>)}</div></details>
         </article>)}
       </section>
       <div className="pool-review-actions"><button className="btn btn-outline" onClick={leaveRoom}>LEAVE ROOM</button><button className="btn btn-primary pool-confirm-button" disabled={busy || iConfirmed} onClick={confirmPlayerPool}>{busy ? "SAVING CONFIRMATION..." : iConfirmed ? "✓ PLAYER POOL CONFIRMED" : "OK, START AUCTION →"}</button></div>
@@ -1180,5 +1525,34 @@ export default function App() {
     </main>;
   };
 
-  return <div className={`app-shell theme-${theme.toLowerCase()}`}>{renderHeader()}{authLoading ? <main className="workspace"><div className="panel-box center-box">Restoring your account session...</div></main> : !account ? renderAuth() : screen === "PROFILE" ? renderProfile() : screen === "PLAYERS" ? renderPlayerManager() : screen === "ANALYTICS" ? renderAnalytics() : screen === "HOME" ? renderHome() : screen === "LOBBY" && room ? renderLobby() : screen === "REVIEW" && room ? renderPoolReview() : screen === "GAME" && room ? renderGame() : screen === "RESULTS" && room ? renderResults() : <main className="workspace"><div className="panel-box center-box">Connecting to arena...</div></main>}</div>;
+  return <div className={`app-shell theme-${theme.toLowerCase()}`}>
+    {renderHeader()}
+    {authLoading ? <main className="workspace"><div className="panel-box center-box">Restoring your account session...</div></main> : !account ? renderAuth() : screen === "PROFILE" ? renderProfile() : screen === "PLAYERS" ? renderPlayerManager() : screen === "ANALYTICS" ? renderAnalytics() : screen === "HOME" ? renderHome() : screen === "LOBBY" && room ? renderLobby() : screen === "REVIEW" && room ? renderPoolReview() : screen === "GAME" && room ? renderGame() : screen === "RESULTS" && room ? renderResults() : <main className="workspace"><div className="panel-box center-box">Connecting to arena...</div></main>}
+
+    {auctionPopup && <div className="bidxi-event-overlay" role="presentation" onClick={() => setAuctionPopup(null)}>
+      <section className={`bidxi-event-modal event-${auctionPopup.type}`} role="alertdialog" aria-modal="true" aria-labelledby="bidxi-event-title" onClick={(event) => event.stopPropagation()}>
+        <button type="button" className="bidxi-modal-close" aria-label="Close notification" onClick={() => setAuctionPopup(null)}>×</button>
+        <div className="bidxi-event-icon">{auctionPopup.icon}</div>
+        <span className="bidxi-event-eyebrow">{auctionPopup.eyebrow}</span>
+        <h2 id="bidxi-event-title">{auctionPopup.title}</h2>
+        <h3>{auctionPopup.player}</h3>
+        <p>{auctionPopup.message}</p>
+        <strong className="bidxi-event-detail">{auctionPopup.detail}</strong>
+        <button type="button" className="bidxi-event-continue" onClick={() => setAuctionPopup(null)}>CONTINUE</button>
+      </section>
+    </div>}
+
+    {confirmAction && <div className="bidxi-event-overlay" role="presentation" onClick={() => setConfirmAction(null)}>
+      <section className={`bidxi-confirm-modal confirm-${confirmAction.tone}`} role="alertdialog" aria-modal="true" aria-labelledby="bidxi-confirm-title" onClick={(event) => event.stopPropagation()}>
+        <button type="button" className="bidxi-modal-close" aria-label="Close confirmation" onClick={() => setConfirmAction(null)}>×</button>
+        <span className="bidxi-event-eyebrow">{confirmAction.eyebrow}</span>
+        <h2 id="bidxi-confirm-title">{confirmAction.title}</h2>
+        <p>{confirmAction.message}</p>
+        <div className="bidxi-confirm-actions">
+          <button type="button" className="bidxi-confirm-cancel" onClick={() => setConfirmAction(null)}>CANCEL</button>
+          <button type="button" className="bidxi-confirm-yes" onClick={confirmRoomAction} disabled={busy}>{busy ? "PLEASE WAIT..." : confirmAction.confirmLabel}</button>
+        </div>
+      </section>
+    </div>}
+  </div>;
 }
